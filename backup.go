@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"io/ioutil"
+	"flag"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
@@ -22,11 +23,11 @@ import (
 	"github.com/crewjam/ec2cluster"
 )
 
-var (
-	certFile = flag.String("cert", "/etc/etcd/etcd-peer.pem", "A PEM eoncoded certificate file.")
-	keyFile  = flag.String("key", "/etc/etcd/etcd-peer-key.pem", "A PEM encoded private key file.")
-	caFile   = flag.String("CA", "/etc/etcd/ca.pem", "A PEM eoncoded CA's certificate file.")
-)
+// var (
+// 	certFile = flag.String("cert", "/etc/etcd/etcd-peer.pem", "A PEM encoded certificate file.")
+// 	keyFile  = flag.String("key", "/etc/etcd/etcd-peer-key.pem", "A PEM encoded private key file.")
+// 	caFile   = flag.String("CA", "/etc/etcd/ca.pem", "A PEM eoncoded CA's certificate file.")
+// )
 
 // backupService invokes backupOnce() periodically if the current node is the cluster leader.
 func backupService(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir string, interval time.Duration) error {
@@ -36,13 +37,16 @@ func backupService(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir strin
 	}
 
 	// Loading Security Assets
-	cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	flag.Parse()
+
+	//cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	cert, err := tls.LoadX509KeyPair("/etc/etcd/etcd-peer.pem", "/etc/etcd/etcd-peer-key.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Load CA cert
-	caCert, err := ioutil.ReadFile(*caFile)
+	caCert, err := ioutil.ReadFile("/etc/etcd/ca.pem")
 	if err != nil {
 		log.Fatal(err)
 	}

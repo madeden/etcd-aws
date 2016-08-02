@@ -4,7 +4,7 @@ GO_SOURCES=$(shell find . -name \*.go)
 SOURCES=$(GO_SOURCES)
 PLATFORM_BINARIES=dist/etcd-aws.Linux.x86_64
 
-IMAGE_NAME=crewjam/etcd-aws
+IMAGE_NAME=samnco/etcd-aws
 GITHUB_USER=crewjam
 GITHUB_REPOSITORY=etcd-aws
 
