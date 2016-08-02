@@ -19,10 +19,13 @@ WantedBy=multi-user.target
 Restart=always
 EnvironmentFile=/etc/etcd_aws.env
 ExecStart=/usr/bin/docker run --name etcd-aws \
-  -p 2379:2379 -p 2380:2380 \
+  -p 2379:2379 \
+  -p 2380:2380 \
   -v /var/lib/etcd2:/var/lib/etcd2 \
-  -e ETCD_BACKUP_BUCKET -e ETCD_BACKUP_KEY \
-  --rm crewjam/etcd-aws
+  -e ETCD_BACKUP_BUCKET \
+  -e ETCD_BACKUP_KEY \
+  -v /etc/etcd:/etc/etcd \
+  --rm samnco/etcd-aws:2.3.0
 ExecStop=-/usr/bin/docker rm -f etcd-aws
 `
 

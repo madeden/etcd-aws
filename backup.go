@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
@@ -19,6 +22,12 @@ import (
 	"github.com/crewjam/ec2cluster"
 )
 
+var (
+	certFile = flag.String("cert", "/etc/etcd/etcd-peer.pem", "A PEM eoncoded certificate file.")
+	keyFile  = flag.String("key", "/etc/etcd/etcd-peer-key.pem", "A PEM encoded private key file.")
+	caFile   = flag.String("CA", "/etc/etcd/ca.pem", "A PEM eoncoded CA's certificate file.")
+)
+
 // backupService invokes backupOnce() periodically if the current node is the cluster leader.
 func backupService(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir string, interval time.Duration) error {
 	instance, err := s.Instance()
@@ -26,26 +35,49 @@ func backupService(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir strin
 		return err
 	}
 
+	// Loading Security Assets
+	cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Load CA cert
+	caCert, err := ioutil.ReadFile(*caFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	// Setup HTTPS client
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caCertPool,
+	}
+	tlsConfig.BuildNameToCertificate()
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	client := &http.Client{Transport: transport}
+
 	ticker := time.Tick(interval)
 	for {
 		<-ticker
 
-		resp, err := http.Get(fmt.Sprintf("http://%s:2379/v2/stats/self", *instance.PrivateIpAddress))
+		resp, err := client.Get(fmt.Sprintf("https://%s:2379/v2/stats/self", *instance.PrivateIpAddress))
 		if err != nil {
-			return fmt.Errorf("%s: http://%s:2379/v2/stats/self: %s", *instance.InstanceId,
+			return fmt.Errorf("%s: https://%s:2379/v2/stats/self: %s", *instance.InstanceId,
 				*instance.PrivateIpAddress, err)
 		}
 
 		nodeState := etcdState{}
 		if err := json.NewDecoder(resp.Body).Decode(&nodeState); err != nil {
-			return fmt.Errorf("%s: http://%s:2379/v2/stats/self: %s", *instance.InstanceId,
+			return fmt.Errorf("%s: https://%s:2379/v2/stats/self: %s", *instance.InstanceId,
 				*instance.PrivateIpAddress, err)
 		}
 
 		// if the cluster has a leader other than the current node, then don't do the
 		// backup.
 		if nodeState.LeaderInfo.Leader != "" && nodeState.ID != nodeState.LeaderInfo.Leader {
-			log.Printf("backup: %s: http://%s:2379/v2/stats/self: not the leader", *instance.InstanceId,
+			log.Printf("backup: %s: https://%s:2379/v2/stats/self: not the leader", *instance.InstanceId,
 				*instance.PrivateIpAddress)
 			<-ticker
 			continue
@@ -114,7 +146,7 @@ func backupOnce(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir string) 
 	if err != nil {
 		return err
 	}
-	etcdClient := etcd.NewClient([]string{fmt.Sprintf("http://%s:2379", *instance.PrivateIpAddress)})
+	etcdClient := etcd.NewClient([]string{fmt.Sprintf("https://%s:2379", *instance.PrivateIpAddress)})
 	if success := etcdClient.SyncCluster(); !success {
 		return fmt.Errorf("backupOnce: cannot sync machines")
 	}
@@ -218,7 +250,7 @@ func restoreBackup(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir strin
 	if err != nil {
 		return err
 	}
-	etcdClient := etcd.NewClient([]string{fmt.Sprintf("http://%s:2379", *instance.PrivateIpAddress)})
+	etcdClient := etcd.NewClient([]string{fmt.Sprintf("https://%s:2379", *instance.PrivateIpAddress)})
 	if success := etcdClient.SyncCluster(); !success {
 		return fmt.Errorf("restore: cannot sync machines")
 	}
@@ -230,6 +262,7 @@ func restoreBackup(s *ec2cluster.Cluster, backupBucket, backupKey, dataDir strin
 	})
 	if err != nil {
 		if reqErr, ok := err.(awserr.RequestFailure); ok {
+			// check if we need to use the client instead of http here
 			if reqErr.StatusCode() == http.StatusNotFound {
 				log.Printf("restore: s3://%s%s does not exist", backupBucket, backupKey)
 				return nil
